@@ -3,14 +3,18 @@ from dotenv import load_dotenv
 from os import getenv
 from decimal import Decimal
 
-from web3 import Web3
-from eth_typing import ChecksumAddress, TypeStr
+
+from web3 import Web3  # // Link to docs: https://shorturl.at/agMQX // #
+from eth_typing import (  # // Link to docs: https://shorturl.at/cBJ28 // #
+    ChecksumAddress,
+    TypeStr,
+)
 
 # Load environment variables from a .env file
 load_dotenv(".env")
 
 # Initialize generic ERC20 ABI
-with open(getenv("PATH_TO_ERC_ABI"), "r") as abi_json:  # type: ignore
+with open(getenv("PATH_TO_ERC_ABI")) as abi_json:  # type: ignore
     ERC20ABI: TypeStr = json.load(abi_json)
 
 # Initialize Uniswap Factory ABI
@@ -125,83 +129,68 @@ class Erc20Token:
         """
         return Decimal(value) / 10**decimalAmount
 
-    def getTopLPAddresses(self) -> list | None:
+    def getTopLPAddresses(self) -> list:
         """
         Find and return the top 2 liquidity pool addresses with the largest reserves.
 
         Returns:
-            list | None: List of the top 2 liquidity pool addresses or None if none are found.
+            list: List of the top 2 liquidity pool addresses, or an empty list if none are found.
         """
-        # Retrieve the amount of created pairs
-        allPairs: int = self.uniswapFactory.functions.allPairsLength().call()
+        allPairs = self.uniswapFactory.functions.allPairsLength().call()
+        liquidityPools = []  # Initialize a list for storing the top liquidity pools
+        poolData = []  # Initialize a list for storing pool data
 
-        # Initialize Lists for object placements
-        liquidityPools: list = []
-        poolData: list = []
-
-        # Search for pairs
-        for pool in range(allPairs):
-            loopedPairAddress: ChecksumAddress = self.uniswapFactory.functions.allPairs(
-                pool
-            ).call()
+        # Iterate through all the liquidity pool pairs
+        for pool in range(235000, allPairs):
+            print(f"Scanning Pool #{pool}")
+            loopedPairAddress = self.uniswapFactory.functions.allPairs(pool).call()
             loopedPairContract = self.w3.eth.contract(
                 address=loopedPairAddress, abi=UNILPABI
             )
+            token0 = loopedPairContract.functions.token0().call()
+            token1 = loopedPairContract.functions.token1().call()
 
-            token0: ChecksumAddress = loopedPairContract.functions.token0().call()
-            token1: ChecksumAddress = loopedPairContract.functions.token1().call()
-
-            # Check if the pair exists and determine its position in the pool[0 or 1]
+            # Check if the current pair is the desired liquidity pool
             if (token0 == self.address and token1 == self.pairTokenAddress) or (
                 token1 == self.address and token0 == self.pairTokenAddress
             ):
-                # Get the reserves from the pair contract
+                print("Liquidity Pool Found!")
                 (
                     reserve0,
                     reserve1,
                     _,
                 ) = loopedPairContract.functions.getReserves().call()
+
                 if loopedPairContract.functions.token0().call() == self.address:
-                    # Normalize the reserves using `normalizeValue()`
-                    normalized_reserve0: Decimal = self.normalizeValue(
-                        reserve0, self.decimals
-                    )
-                    normalized_reserve1: Decimal = self.normalizeValue(
+                    normalizedReserve0 = self.normalizeValue(reserve0, self.decimals)
+                    normalizedReserve1 = self.normalizeValue(
                         reserve1, self.pairContract.functions.decimals().call()
                     )
-
                 elif loopedPairContract.functions.token1().call() == self.address:
-                    normalized_reserve0: Decimal = self.normalizeValue(
+                    normalizedReserve0 = self.normalizeValue(
                         reserve1, self.pairContract.functions.decimals().call()
                     )
-                    normalized_reserve1: Decimal = self.normalizeValue(
-                        reserve0, self.decimals
-                    )
-
+                    normalizedReserve1 = self.normalizeValue(reserve0, self.decimals)
                 else:
-                    # Edge case that an improper LP was provided
-                    print(
-                        "Error during pool finding, no pairs were found. \n Exiting...."
-                    )
-                    exit()
+                    # Raise an error for an improper LP
+                    raise ValueError("Error during pool finding, no pairs were found.")
 
-                # Append the normalized reserve data to the list
+                # Append pool data to the list
                 poolData.append(
-                    (loopedPairAddress, normalized_reserve0, normalized_reserve1)
+                    (loopedPairAddress, normalizedReserve0, normalizedReserve1)
                 )
 
-                # Find the top 2 pools and save them to a new list
-                sortedPools = sorted(poolData, key=lambda x: x[1] + x[2], reverse=True)
-                top2Pools: list = sortedPools[:2]
-                liquidityPools = [pool[0] for pool in top2Pools]
+        # Find the top 2 pools and save their addresses to a new list
+        sortedPools = sorted(poolData, key=lambda x: x[1] + x[2], reverse=True)
+        liquidityPools = [pool[0] for pool in sortedPools[:2]]
 
-                # Return the top 2 pools
-                return liquidityPools
+        return liquidityPools  # Return the top 2 liquidity pool addresses
 
 
 class LiquidityPool:
     def __init__(self, address):
         """
+        #TODO: Add getReserves function or self.reserves attribute
         Initialize a LiquidityPool object with a specified address.
 
         Args:
@@ -248,6 +237,7 @@ class ArbTransaction:
         deadline: int,  # Timestamp of the tx deadline
     ):
         """
+        #TODO: Add checks for more transaction security & gas estimation + fee ratios
         Initialize an arbitrage transaction with specified parameters.
 
         Args & Attributes:
@@ -289,9 +279,9 @@ class ArbTransaction:
 ##@//-----------------\\@##
 ##@//-----------------\\@##
 
-# . Chain Link contract as a test
-CHAINLINKADDRESS = "0x514910771AF9Ca656af840dff83E8264EcF986CA"
-test = Erc20Token(address=CHAINLINKADDRESS)
+# . PEPE contract as a test
+PEPEADDRESS = "0x6982508145454Ce325dDbE47a25d4ec3d2311933"
+test = Erc20Token(address=PEPEADDRESS)
 
 # . Debug calls
 print(test.get_balance("0x98FD04890B3c6299b6E262878ED86A264a06feC9"))
