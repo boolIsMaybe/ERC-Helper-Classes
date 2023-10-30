@@ -267,7 +267,7 @@ class ArbTransaction:
         The outcome of the trade, including the input tokens sent and
         the output tokens received.
         """
-        return lp.contract.functions.swapExactTokensForTokens(
+        return self.lp.contract.functions.swapExactTokensForTokens(
             self.amountIn,
             self.amountOutMin,
             self.path,
@@ -276,23 +276,40 @@ class ArbTransaction:
         ).call()
 
 
-##@//-----------------\\@##
-##@//-----------------\\@##
-##!@//-Testing Code Below-\\@##
-##@//-----------------\\@##
-##@//-----------------\\@##
+##//-----------------------------\\##
+##//-----------------------------\\##
+##! //-Testing Instructions Below-\\ !##
+##//-----------------------------\\##
+##//-----------------------------\\##
 
-# . PEPE contract as a test
+# ? Contracts for Testing
 PEPEADDRESS = "0x6982508145454Ce325dDbE47a25d4ec3d2311933"
-test = Erc20Token(address=PEPEADDRESS)
+LINKADDRESS = "0x514910771AF9Ca656af840dff83E8264EcF986CA"
+USDCADDRESS = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 
-# . Debug calls
-print(test.get_balance("0x98FD04890B3c6299b6E262878ED86A264a06feC9"))
-print(test.symbol)
-lpList = test.getTopLPAddresses()
-print(lpList)
-poolObjects = []
-lp = LiquidityPool(lpList[0])  # type: ignore
-print(lp.address)
-print(lp.token0)
-print(lp.token1)
+
+# ? Pools for Testing
+LINKWETH = "0xa2107FA5B38d9bbd2C461D6EDf11B11A50F6b974"
+USDCWETH = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc"
+PEPEWETH = "0xa43fe16908251ee70ef74718545e4fe6c5ccec9f"
+
+# ? Create a Token Object By passing an address
+token = Erc20Token(USDCADDRESS)
+
+# ? You can then call getTopLPs for the largest liquidity LP's
+# // token.getTopLPAddresses() #Scans 270,000 transactions
+
+# ? To save time you can use one of the pool addresses to initialize an LP object
+usdclp = LiquidityPool(USDCWETH)
+
+# ? From there we can gather info on the LP and then execute trades
+
+
+# # # . Debug calls
+# test = Erc20Token(address=PEPEADDRESS)
+# print(test.get_balance("0x98FD04890B3c6299b6E262878ED86A264a06feC9"))
+# print(test.symbol)
+# lp = LiquidityPool(LINKWETH)  # type: ignore
+# print(lp.address)
+# print(lp.token0)
+# print(lp.token1)
