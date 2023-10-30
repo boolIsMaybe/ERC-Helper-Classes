@@ -179,7 +179,7 @@ class Erc20Token:
                     )
 
                 else:
-                    # Edge case that an improper LP was provided
+                    # Edge case that an improper LP was provided or None was found
                     print(
                         "Error during pool finding, no pairs were found. \n Exiting...."
                     )
