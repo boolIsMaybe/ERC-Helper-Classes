@@ -172,8 +172,11 @@ class Erc20Token:
                     )
                     normalizedReserve1 = self.normalizeValue(reserve0, self.decimals)
                 else:
-                    # Raise an error for an improper LP
-                    raise ValueError("Error during pool finding, no pairs were found.")
+                    # Edge case that an improper LP was provided or None was found
+                    print(
+                        "Error during pool finding, no pairs were found. \n Exiting...."
+                    )
+                    exit()
 
                 # Append pool data to the list
                 poolData.append(
