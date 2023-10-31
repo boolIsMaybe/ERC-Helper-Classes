@@ -2,6 +2,7 @@ import json
 from dotenv import load_dotenv
 from os import getenv
 from decimal import Decimal
+from utilsETH import ContextManager as PoolDB
 
 
 from web3 import Web3  # // Link to docs: https://shorturl.at/agMQX // #
@@ -13,38 +14,48 @@ from eth_typing import (  # // Link to docs: https://shorturl.at/cBJ28 // #
 # Load environment variables from a .env file
 load_dotenv(".env")
 
-# Initialize generic ERC20 ABI
-with open(getenv("PATH_TO_ERC_ABI")) as abi_json:  # type: ignore
-    ERC20ABI: TypeStr = json.load(abi_json)
-
-# Initialize Uniswap Factory ABI
-with open(getenv("PATH_TO_UNI_FACT_ABI")) as uniFact_abi:  # type: ignore
-    UNIFACTABI: TypeStr = json.load(uniFact_abi)
-
-# Initialize Uniswap Router ABI
-with open(getenv("PATH_TO_UNI_ROUTER_ABI")) as uniRout_abi:  # type: ignore
-    UNIROUTERABI: TypeStr = json.load(uniRout_abi)
-
-# Initialize Generic Uniswap LP ABI
-with open(getenv("PATH_TO_UNI_LP_ABI")) as uniLP_abi:  # type: ignore
-    UNILPABI: TypeStr = json.load(uniLP_abi)
-
-# Initialize Uniswap Router Address
-UNIROUTERADDRESS: ChecksumAddress = Web3.to_checksum_address(
-    "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
-)
-
-# Initialize Uniswap Factory Address
-UNIFACTORYADDRESS: ChecksumAddress = Web3.to_checksum_address(
-    "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
-)
-
 # Initialize WETH Address
 WETHADDRESS: ChecksumAddress = Web3.to_checksum_address(
     "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 )
 
 APISTRING: str = getenv("INFURA_API_KEY")  # type: ignore
+
+
+class Uniswap:
+    def __init__(self):
+        # Initialize Web 3 Cursor Object
+        self.w3: Web3 = Web3(Web3.HTTPProvider(APISTRING))
+
+        # -- ABI's
+        with open(getenv("PATH_TO_UNI_LP_ABI")) as uniLP_abi:  # type: ignore
+            self.uniLPABI: TypeStr = json.load(uniLP_abi)
+        with open(getenv("PATH_TO_UNI_FACT_ABI")) as uniFact_abi:  # type: ignore
+            self.uniFactABI: TypeStr = json.load(uniFact_abi)
+        with open(getenv("PATH_TO_UNI_ROUTER_ABI")) as uniRout_abi:  # type: ignore
+            self.uniRouterABI: TypeStr = json.load(uniRout_abi)
+
+        # -- Constants
+        self.routeraddress: ChecksumAddress = Web3.to_checksum_address(
+            "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"  # Uniswap Router Address
+        )
+        self.factoryaddress: ChecksumAddress = Web3.to_checksum_address(
+            "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"  # Uniswap Factory Address
+        )
+        self.poolDatabase: PoolDB = PoolDB()
+
+        # -- Callable Contract Objects
+        self.router = self.contract = self.w3.eth.contract(
+            address=self.routeraddress, abi=self.uniRouterABI
+        )
+        self.factory = self.w3.eth.contract(
+            address=self.factoryaddress,
+            abi=self.uniFactABI,
+        )
+
+    # -- Uniswap Methods
+    def retrievePoolList(self, token0, token1):
+        pass
 
 
 class Erc20Token:
@@ -70,27 +81,25 @@ class Erc20Token:
         """
         # Initialize Web3 connection
         self.w3: Web3 = Web3(Web3.HTTPProvider(APISTRING))
-        # Convert and store token address in checksum format
+
+        # -- ABI's
+        with open(getenv("PATH_TO_ERC_ABI")) as ercabi:  # type: ignore
+            self.erc20ABI: TypeStr = json.load(ercabi)
+
+        # -- Constant's
         self.address: ChecksumAddress = Web3.to_checksum_address(address)
-        # Initialize Callable Contract Object
-        self.contract = self.w3.eth.contract(address=self.address, abi=ERC20ABI)
-        # Get the symbol of the token
-        self.symbol: str = self.contract.functions.symbol().call()
-        # Get the decimal places for the token
-        self.decimals: int = self.get_decimals()
-        # Initialize callable Factory Contract Object
-        self.uniswapFactory = self.w3.eth.contract(
-            address=UNIFACTORYADDRESS,
-            abi=UNIFACTABI,
-        )
-        # Convert and store pair token address in checksum format
+        self.contract = self.w3.eth.contract(address=self.address, abi=self.erc20ABI)
+        self.uniswap = Uniswap()
         self.pairTokenAddress: ChecksumAddress = self.w3.to_checksum_address(
             pairTokenAddress
         )
-        # Initialize Callable pair Contract Object
         self.pairContract = self.w3.eth.contract(
-            address=self.pairTokenAddress, abi=ERC20ABI
+            address=self.pairTokenAddress, abi=self.erc20ABI
         )
+
+        # -- Token Data
+        self.symbol: str = self.contract.functions.symbol().call()
+        self.decimals: int = self.get_decimals()
 
     def get_decimals(self) -> int:
         """
@@ -116,7 +125,7 @@ class Erc20Token:
             / 10**self.decimals
         )
 
-    def normalizeValue(self, value, decimalAmount: int) -> Decimal:
+    def normalizeValue(self, denormalizedValue, decimalAmount: int) -> Decimal:
         """
         Normalize a value given the value of the decimal counter.
 
@@ -127,67 +136,81 @@ class Erc20Token:
         Returns:
             Decimal: The normalized value.
         """
-        return Decimal(value) / 10**decimalAmount
+        return Decimal(denormalizedValue) / 10**decimalAmount
 
-    def getTopLPAddresses(self) -> list:
+    def denormalizeValue(self, normalizedValue, decimalAmount):
         """
-        Find and return the top 2 liquidity pool addresses with the largest reserves.
+        Denormalize a value given the value of the decimal counter.
+
+        Args:
+            normalized_value (Decimal): The normalized value to denormalize.
+            decimalAmount (int): The number of decimal places for the token.
 
         Returns:
-            list: List of the top 2 liquidity pool addresses, or an empty list if none are found.
+            Decimal: The denormalized value.
         """
-        allPairs = self.uniswapFactory.functions.allPairsLength().call()
-        liquidityPools = []  # Initialize a list for storing the top liquidity pools
-        poolData = []  # Initialize a list for storing pool data
+        return normalizedValue * (10**decimalAmount)
 
-        # Iterate through all the liquidity pool pairs
-        for pool in range(235000, allPairs):
-            print(f"Scanning Pool #{pool}")
-            loopedPairAddress = self.uniswapFactory.functions.allPairs(pool).call()
-            loopedPairContract = self.w3.eth.contract(
-                address=loopedPairAddress, abi=UNILPABI
-            )
-            token0 = loopedPairContract.functions.token0().call()
-            token1 = loopedPairContract.functions.token1().call()
+    # TODO: Needs to be moved to Uniswap class, and scan the pool DB instead of calling contracts
+    # def getTopLPAddresses(self) -> list:  # DEPRECATED: ITERATION TOO LONG
+    #     """
+    #     Find and return the top 2 liquidity pool addresses with the largest reserves.
 
-            # Check if the current pair is the desired liquidity pool
-            if (token0 == self.address and token1 == self.pairTokenAddress) or (
-                token1 == self.address and token0 == self.pairTokenAddress
-            ):
-                print("Liquidity Pool Found!")
-                (
-                    reserve0,
-                    reserve1,
-                    _,
-                ) = loopedPairContract.functions.getReserves().call()
+    #     Returns:
+    #         list: List of the top 2 liquidity pool addresses, or an empty list if none are found.
+    #     """
+    #     allPairs = self.uniswap.factory.functions.allPairsLength().call()
+    #     liquidityPools = []  # Initialize a list for storing the top liquidity pools
+    #     poolData = []  # Initialize a list for storing pool data
 
-                if loopedPairContract.functions.token0().call() == self.address:
-                    normalizedReserve0 = self.normalizeValue(reserve0, self.decimals)
-                    normalizedReserve1 = self.normalizeValue(
-                        reserve1, self.pairContract.functions.decimals().call()
-                    )
-                elif loopedPairContract.functions.token1().call() == self.address:
-                    normalizedReserve0 = self.normalizeValue(
-                        reserve1, self.pairContract.functions.decimals().call()
-                    )
-                    normalizedReserve1 = self.normalizeValue(reserve0, self.decimals)
-                else:
-                    # Edge case that an improper LP was provided or None was found
-                    print(
-                        "Error during pool finding, no pairs were found. \n Exiting...."
-                    )
-                    exit()
+    #     # Iterate through all the liquidity pool pairs
+    #     for pool in range(235000, allPairs):
+    #         print(f"Scanning Pool #{pool}")
+    #         loopedPairAddress = self.uniswap.factory.functions.allPairs(pool).call()
+    #         loopedPairContract = self.w3.eth.contract(
+    #             address=loopedPairAddress, abi=self.uniswap.uniLPABI
+    #         )
+    #         token0 = loopedPairContract.functions.token0().call()
+    #         token1 = loopedPairContract.functions.token1().call()
 
-                # Append pool data to the list
-                poolData.append(
-                    (loopedPairAddress, normalizedReserve0, normalizedReserve1)
-                )
+    #         # Check if the current pair is the desired liquidity pool
+    #         if (token0 == self.address and token1 == self.pairTokenAddress) or (
+    #             token1 == self.address and token0 == self.pairTokenAddress
+    #         ):
+    #             print("Liquidity Pool Found!")
+    #             (
+    #                 reserve0,
+    #                 reserve1,
+    #                 _,
+    #             ) = loopedPairContract.functions.getReserves().call()
 
-        # Find the top 2 pools and save their addresses to a new list
-        sortedPools = sorted(poolData, key=lambda x: x[1] + x[2], reverse=True)
-        liquidityPools = [pool[0] for pool in sortedPools[:2]]
+    #             if loopedPairContract.functions.token0().call() == self.address:
+    #                 normalizedReserve0 = self.normalizeValue(reserve0, self.decimals)
+    #                 normalizedReserve1 = self.normalizeValue(
+    #                     reserve1, self.pairContract.functions.decimals().call()
+    #                 )
+    #             elif loopedPairContract.functions.token1().call() == self.address:
+    #                 normalizedReserve0 = self.normalizeValue(
+    #                     reserve1, self.pairContract.functions.decimals().call()
+    #                 )
+    #                 normalizedReserve1 = self.normalizeValue(reserve0, self.decimals)
+    #             else:
+    #                 # Edge case that an improper LP was provided or None was found
+    #                 print(
+    #                     "Error during pool finding, no pairs were found. \n Exiting...."
+    #                 )
+    #                 exit()
 
-        return liquidityPools  # Return the top 2 liquidity pool addresses
+    #             # Append pool data to the list
+    #             poolData.append(
+    #                 (loopedPairAddress, normalizedReserve0, normalizedReserve1)
+    #             )
+
+    #     # Find the top 2 pools and save their addresses to a new list
+    #     sortedPools = sorted(poolData, key=lambda x: x[1] + x[2], reverse=True)
+    #     liquidityPools = [pool[0] for pool in sortedPools[:2]]
+
+    #     return liquidityPools  # Return the top 2 liquidity pool addresses
 
 
 class LiquidityPool:
@@ -208,12 +231,15 @@ class LiquidityPool:
             router (Contract): Uniswap Router contract instance.
         """
         self.w3: Web3 = Web3(Web3.HTTPProvider(APISTRING))
+        self.uniswap = Uniswap()
         self.address: ChecksumAddress = Web3.to_checksum_address(address)
-        self.contract = self.w3.eth.contract(address=self.address, abi=UNILPABI)
+        self.contract = self.w3.eth.contract(
+            address=self.address, abi=self.uniswap.uniLPABI
+        )
         self.token0: ChecksumAddress = self.contract.functions.token0().call()
         self.token1: ChecksumAddress = self.contract.functions.token1().call()
         self.router = self.contract = self.w3.eth.contract(
-            address=UNIROUTERADDRESS, abi=UNIROUTERABI
+            address=self.uniswap.routeraddress, abi=self.uniswap.uniRouterABI
         )
 
     def calculateArbTrade(self):
@@ -305,11 +331,11 @@ usdclp = LiquidityPool(USDCWETH)
 # ? From there we can gather info on the LP and then execute trades
 
 
-# # # . Debug calls
-# test = Erc20Token(address=PEPEADDRESS)
-# print(test.get_balance("0x98FD04890B3c6299b6E262878ED86A264a06feC9"))
-# print(test.symbol)
-# lp = LiquidityPool(LINKWETH)  # type: ignore
-# print(lp.address)
-# print(lp.token0)
-# print(lp.token1)
+# # . Debug calls
+test = Erc20Token(address=PEPEADDRESS)
+print(test.get_balance("0x98FD04890B3c6299b6E262878ED86A264a06feC9"))
+print(test.symbol)
+lp = LiquidityPool(LINKWETH)  # type: ignore
+print(lp.address)
+print(lp.token0)
+print(lp.token1)
