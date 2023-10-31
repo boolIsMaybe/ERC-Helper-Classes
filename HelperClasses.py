@@ -45,7 +45,7 @@ class Uniswap:
         self.poolDatabase: PoolDB = PoolDB()
 
         # -- Callable Contract Objects
-        self.router = self.contract = self.w3.eth.contract(
+        self.router = self.w3.eth.contract(
             address=self.routeraddress, abi=self.uniRouterABI
         )
         self.factory = self.w3.eth.contract(
@@ -62,23 +62,6 @@ class Erc20Token:
     def __init__(
         self, address: str, pairTokenAddress: str | ChecksumAddress = WETHADDRESS
     ):
-        """
-        Initialize an ERC20 token with specified addresses and web3 connection.
-
-        Args:
-            address (str): The ERC20 token contract address.
-            pairTokenAddress (str): Address of the paired token (default is WETH).
-
-        Attributes:
-            w3 (Web3): Web3 instance for connecting to Ethereum.
-            address (ChecksumAddress): Checksum format of the ERC20 token address.
-            symbol (str): Symbol of the ERC20 token.
-            contract (Contract): ERC20 token contract instance.
-            decimals (int): Number of decimal places for the token.
-            uniswapFactory (Contract): Uniswap Factory contract instance.
-            pairTokenAddress (ChecksumAddress): Checksum format of the paired token address.
-            pairContract (Contract): Paired token contract instance.
-        """
         # Initialize Web3 connection
         self.w3: Web3 = Web3(Web3.HTTPProvider(APISTRING))
 
@@ -102,63 +85,22 @@ class Erc20Token:
         self.decimals: int = self.get_decimals()
 
     def get_decimals(self) -> int:
-        """
-        Get the number of decimal places for the token.
-
-        Returns:
-            int: Number of decimal places.
-        """
         return self.contract.functions.decimals().call()
 
     def get_balance(self, address) -> Decimal:
-        """
-        Get the balance of the token for a specific address.
-
-        Args:
-            address (ChecksumAddress): The address to check the balance for.
-
-        Returns:
-            Decimal: The balance of the token.
-        """
         return (
             Decimal(self.contract.functions.balanceOf(address).call())
             / 10**self.decimals
         )
 
     def normalizeValue(self, denormalizedValue, decimalAmount: int) -> Decimal:
-        """
-        Normalize a value given the value of the decimal counter.
-
-        Args:
-            value: The value to normalize.
-            decimalAmount (int): The number of decimal places for the token.
-
-        Returns:
-            Decimal: The normalized value.
-        """
         return Decimal(denormalizedValue) / 10**decimalAmount
 
     def denormalizeValue(self, normalizedValue, decimalAmount):
-        """
-        Denormalize a value given the value of the decimal counter.
-
-        Args:
-            normalized_value (Decimal): The normalized value to denormalize.
-            decimalAmount (int): The number of decimal places for the token.
-
-        Returns:
-            Decimal: The denormalized value.
-        """
         return normalizedValue * (10**decimalAmount)
 
     # TODO: Needs to be moved to Uniswap class, and scan the pool DB instead of calling contracts
     # def getTopLPAddresses(self) -> list:  # DEPRECATED: ITERATION TOO LONG
-    #     """
-    #     Find and return the top 2 liquidity pool addresses with the largest reserves.
-
-    #     Returns:
-    #         list: List of the top 2 liquidity pool addresses, or an empty list if none are found.
-    #     """
     #     allPairs = self.uniswap.factory.functions.allPairsLength().call()
     #     liquidityPools = []  # Initialize a list for storing the top liquidity pools
     #     poolData = []  # Initialize a list for storing pool data
@@ -217,19 +159,8 @@ class LiquidityPool:
     def __init__(self, address):
         """
         #TODO: Add getReserves function or self.reserves attribute
-        Initialize a LiquidityPool object with a specified address.
-
-        Args:
-            address (str): The address of the LiquidityPool contract.
-
-        Attributes:
-            w3 (Web3): Web3 instance for connecting to Ethereum.
-            address (ChecksumAddress): Checksum format of the LiquidityPool contract address.
-            contract (Contract): LiquidityPool contract instance.
-            token0 (ChecksumAddress): Address of the first token in the pair.
-            token1 (ChecksumAddress): Address of the second token in the pair.
-            router (Contract): Uniswap Router contract instance.
         """
+
         self.w3: Web3 = Web3(Web3.HTTPProvider(APISTRING))
         self.uniswap = Uniswap()
         self.address: ChecksumAddress = Web3.to_checksum_address(address)
@@ -238,27 +169,17 @@ class LiquidityPool:
         )
         self.token0: ChecksumAddress = self.contract.functions.token0().call()
         self.token1: ChecksumAddress = self.contract.functions.token1().call()
-        self.router = self.contract = self.w3.eth.contract(
-            address=self.uniswap.routeraddress, abi=self.uniswap.uniRouterABI
-        )
+        self.router = self.uniswap.router
 
     def calculateArbTrade(self):
-        """
-        Calculate an arbitrage trade within the liquidity pool.
-
-        This method should be implemented to calculate arbitrage opportunities.
-
-        Returns:
-            The outcome of the arbitrage trade.
-        """
         pass
 
 
-# Define the ArbTransaction class
-class ArbTransaction:
+# Define the RouterTransaction class
+class RouterTransaction:
     def __init__(
         self,
-        lp: LiquidityPool,
+        uniswap: Uniswap,
         amountIn: int,  # Amount of Input Tokens to Send
         amountOutMin: int,  # Min Amount Received
         path: list,  # List of addresses for the trade route
@@ -267,18 +188,8 @@ class ArbTransaction:
     ):
         """
         #TODO: Add checks for more transaction security & gas estimation + fee ratios
-        Initialize an arbitrage transaction with specified parameters.
-
-        Args & Attributes:
-            lp (LiquidityPool): The LiquidityPool object for the trade.
-            amountIn (int): The amount of input tokens to be swapped.
-            amountOutMin (int): The minimum amount of output tokens expected.
-            path (list): A list of token addresses that represent the swap route.
-            receivingAddress (str): The recipient address for the output tokens.
-            deadline (int): The deadline by which the transaction must be executed.
-
         """
-        self.lp = lp
+        self.uniswap = Uniswap()
         self.amountIn = amountIn
         self.amountOutMin = amountOutMin
         self.path = path
@@ -286,14 +197,7 @@ class ArbTransaction:
         self.deadline = deadline
 
     def executeTransaction(self):
-        """
-        Execute a token swap transaction using the provided parameters.
-
-        Returns:
-        The outcome of the trade, including the input tokens sent and
-        the output tokens received.
-        """
-        return self.lp.contract.functions.swapExactTokensForTokens(
+        return self.uniswap.router.functions.swapExactTokensForTokens(
             self.amountIn,
             self.amountOutMin,
             self.path,
