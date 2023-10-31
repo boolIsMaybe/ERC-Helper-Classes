@@ -12,9 +12,20 @@ from eth_typing import (  # // Link to docs: https://shorturl.at/cBJ28 // #
 
 load_dotenv(".env")
 
-APISTRING: str = getenv("INFURA_API_KEY")  # type: ignore
+INFURAAPISTRING: str = getenv("INFURA_API_KEY")  # type: ignore
+ALCHEMYAPISTRING: str = getenv("ALCHEMY_API_KEY")  # type: ignore
 
-w3: Web3 = Web3(Web3.HTTPProvider(APISTRING))
+w3: Web3 = Web3(
+    Web3.HTTPProvider(
+        "https://eth-mainnet.g.alchemy.com/v2/v4hI0o0eZxQMfujfBU-KaRB-roaCvdWf"
+    )
+)
+try:
+    w3.is_connected()
+    print("Connected to ETH Mainnet")
+except:
+    print("Cannot connect to ETH Mainnet")
+    exit()
 
 UNIFACTORYADDRESS: ChecksumAddress = Web3.to_checksum_address(
     "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
