@@ -4,28 +4,56 @@ from os import getenv
 from decimal import Decimal
 
 from web3 import Web3  # // Link to docs: https://shorturl.at/agMQX // #
+from eth_account import Account  # // Link to docs: https://shorturl.at/sHW39 // #
+from eth_account.signers.local import LocalAccount
 from eth_typing import (  # // Link to docs: https://shorturl.at/cBJ28 // #
     ChecksumAddress,
     TypeStr,
 )
+
 
 from .utilsETH import ContextManager as PoolDB
 
 # Load environment variables from a .env file
 load_dotenv(".env")
 
-# Initialize WETH Address
+# -- Initialize Global Constants
 WETHADDRESS: ChecksumAddress = Web3.to_checksum_address(
     "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 )
-
 APISTRING: str = getenv("INFURA_API_KEY")  # type: ignore
+PRIVATEKEY: str = getenv("PRIVATE_KEY")  # type: ignore
+PRIORITYBOOST = 2  # // Sets constant for +increment of Max Priority Fee
+
+
+class User:
+    def __init__(self):
+        # Initialize Web 3 Cursor Object
+        self.w3: Web3 = Web3(Web3.HTTPProvider(APISTRING))
+
+        # -- Constants
+        self.account: LocalAccount = Account.from_key(PRIVATEKEY)
+        self.address: ChecksumAddress = self.account.address
+        self.nonce: int = self.w3.eth.get_transaction_count(self.address)
+
+        # -- Chain Variables
+        self.gasPrice = self.w3.eth.gas_price
+        self.maxPriorityFee = self.w3.eth.max_priority_fee
+        self.chainID = self.w3.eth.chain_id
+
+    # -- Class Methods
+    def buildTX(self):
+        pass
+
+    def signTX(self):
+        pass
 
 
 class Uniswap:
     def __init__(self):
-        # Initialize Web 3 Cursor Object
+        # Initialize Web 3 Cursor Object & User
         self.w3: Web3 = Web3(Web3.HTTPProvider(APISTRING))
+        self.user = User()
 
         # -- ABI's
         with open(getenv("PATH_TO_UNI_LP_ABI")) as uniLP_abi:  # type: ignore
@@ -42,7 +70,7 @@ class Uniswap:
         self.factoryaddress: ChecksumAddress = Web3.to_checksum_address(
             "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"  # Uniswap Factory Address
         )
-        self.poolDatabase: PoolDB = PoolDB()
+        self.poolDatabase: PoolDB = PoolDB()  # Database of Uni V2 pools
 
         # -- Callable Contract Objects
         self.router = self.w3.eth.contract(
@@ -53,8 +81,28 @@ class Uniswap:
             abi=self.uniFactABI,
         )
 
-    # -- Uniswap Methods
+    # -- Class Methods
     def retrievePoolList(self, token0, token1):
+        with self.poolDatabase as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+            SELECT address
+            FROM pools
+            WHERE (token0 = ? AND token1 = ?) OR (token0 = ? AND token1 = ?);
+            """,
+                (token0, token1, token1, token0),
+            )
+            results = cursor.fetchall()
+        addresses = [result[0] for result in results]
+        return addresses
+
+    def retrieveTopPools(self):
+        pass
+
+    def executeRouterSwap(
+        self, amountIn, amountOutMin, path, receivingAddress, deadline
+    ):
         pass
 
 
@@ -62,8 +110,9 @@ class Erc20Token:
     def __init__(
         self, address: str, pairTokenAddress: str | ChecksumAddress = WETHADDRESS
     ):
-        # Initialize Web3 connection
+        # Initialize Web 3 Cursor Object & User
         self.w3: Web3 = Web3(Web3.HTTPProvider(APISTRING))
+        self.user = User()
 
         # -- ABI's
         with open(getenv("PATH_TO_ERC_ABI")) as ercabi:  # type: ignore
@@ -82,16 +131,22 @@ class Erc20Token:
 
         # -- Token Data
         self.symbol: str = self.contract.functions.symbol().call()
-        self.decimals: int = self.get_decimals()
+        self.decimals: int = self.getDecimals()
 
-    def get_decimals(self) -> int:
+    def getDecimals(self) -> int:
         return self.contract.functions.decimals().call()
 
-    def get_balance(self, address) -> Decimal:
-        return (
-            Decimal(self.contract.functions.balanceOf(address).call())
-            / 10**self.decimals
-        )
+    def getBalance(self, address: ChecksumAddress | None) -> Decimal:
+        if address != None:
+            return (
+                Decimal(self.contract.functions.balanceOf(address).call())
+                / 10**self.decimals
+            )
+        else:
+            return (
+                Decimal(self.contract.functions.balanceOf(self.user.address).call())
+                / 10**self.decimals
+            )
 
     def normalizeValue(self, denormalizedValue, decimalAmount: int) -> Decimal:
         return Decimal(denormalizedValue) / 10**decimalAmount
@@ -99,7 +154,7 @@ class Erc20Token:
     def denormalizeValue(self, normalizedValue, decimalAmount):
         return normalizedValue * (10**decimalAmount)
 
-    # TODO: Needs to be moved to Uniswap class, and scan the pool DB instead of calling contracts
+    # TODO: Needs to be moved to Uniswap class, split between 2 functions
     def getTopLPAddresses(self) -> list:  # DEPRECATED: ITERATION TOO LONG
         allPairs = self.uniswap.factory.functions.allPairsLength().call()
         liquidityPools = []  # Initialize a list for storing the top liquidity pools
@@ -123,7 +178,7 @@ class Erc20Token:
                 (
                     reserve0,
                     reserve1,
-                    _,
+                    timestamp,
                 ) = loopedPairContract.functions.getReserves().call()
 
                 # Find position of target token and pair token
@@ -158,62 +213,33 @@ class Erc20Token:
 
 class LiquidityPool:
     def __init__(self, address):
-        """
-        #TODO: Add getReserves function or self.reserves attribute
-        """
-
+        # Initialize Web 3 Cursor Object & User
         self.w3: Web3 = Web3(Web3.HTTPProvider(APISTRING))
+        self.user = User()
+
+        # -- Constant's
         self.uniswap = Uniswap()
         self.address: ChecksumAddress = Web3.to_checksum_address(address)
+        self.user = Account.from_key(PRIVATEKEY)
+
+        # -- Callable Contract Objects
         self.contract = self.w3.eth.contract(
             address=self.address, abi=self.uniswap.uniLPABI
         )
+        self.router = self.uniswap.router
+
+        # -- Variables
         self.token0: ChecksumAddress = self.contract.functions.token0().call()
         self.token1: ChecksumAddress = self.contract.functions.token1().call()
-        self.router = self.uniswap.router
+        self.reserves: list = self.contract.functions.getReserves().call()[:2]
+        self.totalSupply: int = self.contract.functions.getReserves().call()
 
     def calculateArbTrade(self):
         pass
 
+    def getPath(self):
+        pass
 
-# Define the RouterTransaction class
-class ArbTransaction:
-    def __init__(
-        self,
-        uniswap: Uniswap,
-        amountIn: int,  # Amount of Input Tokens to Send
-        amountOutMin: int,  # Min Amount Received
-        path: list,  # List of addresses for the trade route
-        receivingAddress: ChecksumAddress,  # Msg.sender
-        deadline: int,  # Timestamp of the tx deadline
-        lp: LiquidityPool | None = None,
-    ):
-        """
-        #TODO: Add checks for more transaction security & gas estimation + fee ratios
-        """
-        self.uniswap = Uniswap()
-        self.lp = lp
-        self.amountIn = amountIn
-        self.amountOutMin = amountOutMin
-        self.path = path
-        self.receivingAddress = receivingAddress
-        self.deadline = deadline
-
-    def executeRouterTransaction(self):
-        return self.uniswap.router.functions.swapExactTokensForTokens(
-            self.amountIn,
-            self.amountOutMin,
-            self.path,
-            self.receivingAddress,
-            self.deadline,
-        ).call()
-
-
-##//-----------------------------\\##
-##//-----------------------------\\##
-##! //-Testing Instructions Below-\\ !##
-##//-----------------------------\\##
-##//-----------------------------\\##
 
 # ? Contracts for Testing
 PEPEADDRESS = "0x6982508145454Ce325dDbE47a25d4ec3d2311933"
@@ -226,21 +252,10 @@ LINKWETH = "0xa2107FA5B38d9bbd2C461D6EDf11B11A50F6b974"
 USDCWETH = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc"
 PEPEWETH = "0xa43fe16908251ee70ef74718545e4fe6c5ccec9f"
 
-# ? Create a Token Object By passing an address
-token = Erc20Token(USDCADDRESS)
-
-# ? You can then call getTopLPs for the largest liquidity LP's
-# // token.getTopLPAddresses() #Scans 270,000 transactions
-
-# ? To save time you can use one of the pool addresses to initialize an LP object
-usdclp = LiquidityPool(USDCWETH)
-
-# ? From there we can gather info on the LP and then execute trades
-
 
 # # . Debug calls
 test = Erc20Token(address=PEPEADDRESS)
-print(test.get_balance("0x98FD04890B3c6299b6E262878ED86A264a06feC9"))
+print(test.getBalance(None))
 print(test.symbol)
 lp = LiquidityPool(LINKWETH)  # type: ignore
 print(lp.address)
