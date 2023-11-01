@@ -15,11 +15,7 @@ load_dotenv(".env")
 INFURAAPISTRING: str = getenv("INFURA_API_KEY")  # type: ignore
 ALCHEMYAPISTRING: str = getenv("ALCHEMY_API_KEY")  # type: ignore
 
-w3: Web3 = Web3(
-    Web3.HTTPProvider(
-        "https://eth-mainnet.g.alchemy.com/v2/v4hI0o0eZxQMfujfBU-KaRB-roaCvdWf"
-    )
-)
+w3: Web3 = Web3(Web3.HTTPProvider(ALCHEMYAPISTRING))
 try:
     w3.is_connected()
     print("Connected to ETH Mainnet")
@@ -58,16 +54,10 @@ class ContextManager:
 def updateUNIv2Pairs():
     allPairs = uniswapFactory.functions.allPairsLength().call()
 
-    with ContextManager() as conn:
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT COUNT(*) FROM pools")
-        count = cursor.fetchone()[0]
-        print(
-            f"There is {count} pools in the database already\n scanning pools in range {count}-{allPairs}"
-        )
+    dbCount = retrieveDBSize()
 
     # Iterate through all the liquidity pool pairs
-    for pool in range(count, allPairs):
+    for pool in range(dbCount, allPairs):
         print(f"Scanning Pool #{pool}")
         loopedPairAddress = uniswapFactory.functions.allPairs(pool).call()
         loopedPairContract = w3.eth.contract(address=loopedPairAddress, abi=UNILPABI)

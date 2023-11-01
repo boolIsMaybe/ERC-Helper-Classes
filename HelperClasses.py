@@ -2,14 +2,14 @@ import json
 from dotenv import load_dotenv
 from os import getenv
 from decimal import Decimal
-from utilsETH import ContextManager as PoolDB
-
 
 from web3 import Web3  # // Link to docs: https://shorturl.at/agMQX // #
 from eth_typing import (  # // Link to docs: https://shorturl.at/cBJ28 // #
     ChecksumAddress,
     TypeStr,
 )
+
+from .utilsETH import ContextManager as PoolDB
 
 # Load environment variables from a .env file
 load_dotenv(".env")
@@ -100,59 +100,60 @@ class Erc20Token:
         return normalizedValue * (10**decimalAmount)
 
     # TODO: Needs to be moved to Uniswap class, and scan the pool DB instead of calling contracts
-    # def getTopLPAddresses(self) -> list:  # DEPRECATED: ITERATION TOO LONG
-    #     allPairs = self.uniswap.factory.functions.allPairsLength().call()
-    #     liquidityPools = []  # Initialize a list for storing the top liquidity pools
-    #     poolData = []  # Initialize a list for storing pool data
+    def getTopLPAddresses(self) -> list:  # DEPRECATED: ITERATION TOO LONG
+        allPairs = self.uniswap.factory.functions.allPairsLength().call()
+        liquidityPools = []  # Initialize a list for storing the top liquidity pools
+        poolData = []  # Initialize a list for storing pool data
 
-    #     # Iterate through all the liquidity pool pairs
-    #     for pool in range(235000, allPairs):
-    #         print(f"Scanning Pool #{pool}")
-    #         loopedPairAddress = self.uniswap.factory.functions.allPairs(pool).call()
-    #         loopedPairContract = self.w3.eth.contract(
-    #             address=loopedPairAddress, abi=self.uniswap.uniLPABI
-    #         )
-    #         token0 = loopedPairContract.functions.token0().call()
-    #         token1 = loopedPairContract.functions.token1().call()
+        # Iterate through all the liquidity pool pairs
+        for pool in range(235000, allPairs):
+            print(f"Scanning Pool #{pool}")
+            loopedPairAddress = self.uniswap.factory.functions.allPairs(pool).call()
+            loopedPairContract = self.w3.eth.contract(
+                address=loopedPairAddress, abi=self.uniswap.uniLPABI
+            )
+            token0 = loopedPairContract.functions.token0().call()
+            token1 = loopedPairContract.functions.token1().call()
 
-    #         # Check if the current pair is the desired liquidity pool
-    #         if (token0 == self.address and token1 == self.pairTokenAddress) or (
-    #             token1 == self.address and token0 == self.pairTokenAddress
-    #         ):
-    #             print("Liquidity Pool Found!")
-    #             (
-    #                 reserve0,
-    #                 reserve1,
-    #                 _,
-    #             ) = loopedPairContract.functions.getReserves().call()
+            # Check if the current pair is the desired liquidity pool
+            if (token0 == self.address and token1 == self.pairTokenAddress) or (
+                token1 == self.address and token0 == self.pairTokenAddress
+            ):
+                print("Liquidity Pool Found!")
+                (
+                    reserve0,
+                    reserve1,
+                    _,
+                ) = loopedPairContract.functions.getReserves().call()
 
-    #             if loopedPairContract.functions.token0().call() == self.address:
-    #                 normalizedReserve0 = self.normalizeValue(reserve0, self.decimals)
-    #                 normalizedReserve1 = self.normalizeValue(
-    #                     reserve1, self.pairContract.functions.decimals().call()
-    #                 )
-    #             elif loopedPairContract.functions.token1().call() == self.address:
-    #                 normalizedReserve0 = self.normalizeValue(
-    #                     reserve1, self.pairContract.functions.decimals().call()
-    #                 )
-    #                 normalizedReserve1 = self.normalizeValue(reserve0, self.decimals)
-    #             else:
-    #                 # Edge case that an improper LP was provided or None was found
-    #                 print(
-    #                     "Error during pool finding, no pairs were found. \n Exiting...."
-    #                 )
-    #                 exit()
+                # Find position of target token and pair token
+                if loopedPairContract.functions.token0().call() == self.address:
+                    normalizedReserve0 = self.normalizeValue(reserve0, self.decimals)
+                    normalizedReserve1 = self.normalizeValue(
+                        reserve1, self.pairContract.functions.decimals().call()
+                    )
+                elif loopedPairContract.functions.token1().call() == self.address:
+                    normalizedReserve0 = self.normalizeValue(
+                        reserve1, self.pairContract.functions.decimals().call()
+                    )
+                    normalizedReserve1 = self.normalizeValue(reserve0, self.decimals)
+                else:
+                    # Edge case that an improper LP was provided or None was found
+                    print(
+                        "Error during pool finding, no pairs were found. \n Exiting...."
+                    )
+                    exit()
 
-    #             # Append pool data to the list
-    #             poolData.append(
-    #                 (loopedPairAddress, normalizedReserve0, normalizedReserve1)
-    #             )
+                # Append pool data to the list
+                poolData.append(
+                    (loopedPairAddress, normalizedReserve0, normalizedReserve1)
+                )
 
-    #     # Find the top 2 pools and save their addresses to a new list
-    #     sortedPools = sorted(poolData, key=lambda x: x[1] + x[2], reverse=True)
-    #     liquidityPools = [pool[0] for pool in sortedPools[:2]]
+        # Find the top 2 pools and save their addresses to a new list
+        sortedPools = sorted(poolData, key=lambda x: x[1] + x[2], reverse=True)
+        liquidityPools = [pool[0] for pool in sortedPools[:2]]
 
-    #     return liquidityPools  # Return the top 2 liquidity pool addresses
+        return liquidityPools  # Return the top 2 liquidity pool addresses
 
 
 class LiquidityPool:
@@ -176,7 +177,7 @@ class LiquidityPool:
 
 
 # Define the RouterTransaction class
-class RouterTransaction:
+class ArbTransaction:
     def __init__(
         self,
         uniswap: Uniswap,
@@ -185,18 +186,20 @@ class RouterTransaction:
         path: list,  # List of addresses for the trade route
         receivingAddress: ChecksumAddress,  # Msg.sender
         deadline: int,  # Timestamp of the tx deadline
+        lp: LiquidityPool | None = None,
     ):
         """
         #TODO: Add checks for more transaction security & gas estimation + fee ratios
         """
         self.uniswap = Uniswap()
+        self.lp = lp
         self.amountIn = amountIn
         self.amountOutMin = amountOutMin
         self.path = path
         self.receivingAddress = receivingAddress
         self.deadline = deadline
 
-    def executeTransaction(self):
+    def executeRouterTransaction(self):
         return self.uniswap.router.functions.swapExactTokensForTokens(
             self.amountIn,
             self.amountOutMin,
